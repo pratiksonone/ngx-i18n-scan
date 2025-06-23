@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
-import {detectHardcodedTextInHTML} from './hardcoded-scanner.js';
+import {detectHardcodedTextInHTML, detectHardcodedTextInTS, replaceHardcodedTextInTS} from './hardcoded-scanner.js';
 
 export function processHardcodedText(
     srcPath: string,
@@ -12,9 +12,11 @@ export function processHardcodedText(
         return;
     }
 
-    console.log(chalk.yellow('\n🔎 Scanning for hardcoded text in HTML files...'));
-    const appFolderPath = path.join(srcPath, "src", "app");
-    const hardcodedResults = detectHardcodedTextInHTML(appFolderPath);
+    console.log(chalk.yellow('\n🔎 Scanning for hardcoded text in Angular component files...'));
+    const appFolderPath = path.join(srcPath, 'src', 'app');
+    const htmlResults = detectHardcodedTextInHTML(appFolderPath);
+    const tsResults = detectHardcodedTextInTS(appFolderPath);
+    const hardcodedResults = [...htmlResults, ...tsResults];
 
     if (hardcodedResults.length === 0) {
         console.log(chalk.green('✅ No hardcoded text found.'));
@@ -61,7 +63,7 @@ export function processHardcodedText(
             key = `text.${keyBase}`;
             let suffix = 1;
 
-            // Ensure unique key, only appending suffix if needed
+            // Ensure unique key
             while (translationJson[key] && translationJson[key] !== item.text || generatedKeys.has(key)) {
                 key = `text.${keyBase}.${suffix++}`;
             }
@@ -81,45 +83,45 @@ export function processHardcodedText(
         }, {} as { [file: string]: string[] });
 
         Object.entries(grouped).forEach(([file, texts]) => {
-            let fileContent = fs.readFileSync(file, 'utf8');
+            if (file.endsWith('.html')) {
+                let fileContent = fs.readFileSync(file, 'utf8');
+                // Sort texts by length (descending) to prioritize longer strings
+                const sortedTexts = texts.sort((a, b) => b.length - a.length);
 
-            // Sort texts by length (descending) to prioritize longer strings
-            const sortedTexts = texts.sort((a, b) => b.length - a.length);
+                // Handle HTML replacements
+                const ternaryRegex = /\{\{\s*([^?]+?)\s*\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]\s*\}\}/g;
+                fileContent = fileContent.replace(ternaryRegex, (match, condition, trueText, falseText) => {
+                    const trueKey = replacements[trueText] ? `'${replacements[trueText]}'` : `'${trueText}'`;
+                    const falseKey = replacements[falseText] ? `'${replacements[falseText]}'` : `'${falseText}'`;
+                    return `{{ (${condition.trim()} ? ${trueKey} : ${falseKey}) | translate }}`;
+                });
 
-            // Handle ternary expressions in {{ ... }}
-            const ternaryRegex = /\{\{\s*([^?]+?)\s*\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]\s*\}\}/g;
-            fileContent = fileContent.replace(ternaryRegex, (match, condition, trueText, falseText) => {
-                const trueKey = replacements[trueText] ? `'${replacements[trueText]}'` : `'${trueText}'`;
-                const falseKey = replacements[falseText] ? `'${replacements[falseText]}'` : `'${falseText}'`;
-                return `{{ (${condition.trim()} ? ${trueKey} : ${falseKey}) | translate }}`;
-            });
+                const dynamicPlaceholderRegex = /\[(\w+)\]="([^"]*?)\s*\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]"/g;
+                fileContent = fileContent.replace(dynamicPlaceholderRegex, (match, attr, condition, trueText, falseText) => {
+                    const trueKey = replacements[trueText] ? `'${replacements[trueText]}'` : `'${trueText}'`;
+                    const falseKey = replacements[falseText] ? `'${replacements[falseText]}'` : `'${falseText}'`;
+                    return `[${attr}]="(${condition.trim()} ? ${trueKey} : ${falseKey}) | translate"`;
+                });
 
-            // Handle dynamic placeholders like [placeholder]="..."
-            const dynamicPlaceholderRegex = /\[(\w+)\]="([^"]*?)\s*\?\s*['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]"/g;
-            fileContent = fileContent.replace(dynamicPlaceholderRegex, (match, attr, condition, trueText, falseText) => {
-                const trueKey = replacements[trueText] ? `'${replacements[trueText]}'` : `'${trueText}'`;
-                const falseKey = replacements[falseText] ? `'${replacements[falseText]}'` : `'${falseText}'`;
-                return `[${attr}]="(${condition.trim()} ? ${trueKey} : ${falseKey}) | translate"`;
-            });
+                const staticPlaceholderRegex = /placeholder="([^"]+)"/g;
+                fileContent = fileContent.replace(staticPlaceholderRegex, (match, text) => {
+                    const key = replacements[text] ? replacements[text] : text;
+                    return `placeholder="{{ '${key}' | translate }}"`;
+                });
 
-            // Handle static placeholders like placeholder="..."
-            const staticPlaceholderRegex = /placeholder="([^"]+)"/g;
-            fileContent = fileContent.replace(staticPlaceholderRegex, (match, text) => {
-                const key = replacements[text] ? replacements[text] : text;
-                return `placeholder="{{ '${key}' | translate }}"`;
-            });
+                sortedTexts.forEach(text => {
+                    const key = replacements[text];
+                    const escapedText = text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                    const textRegex = new RegExp(`(?!<!--[^>]*)(>|\\s)${escapedText}(?=<|\\s)(?![^<]*-->)`, 'g');
+                    fileContent = fileContent.replace(textRegex, `$1{{ '${key}' | translate }}`);
+                });
 
-            // Handle standalone text, prioritizing longer strings and excluding comments
-            sortedTexts.forEach(text => {
-                const key = replacements[text];
-                const escapedText = text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-                // Match text outside of comments
-                const textRegex = new RegExp(`(?!<!--[^>]*)(>|\\s)${escapedText}(?=<|\\s)(?![^<]*-->)`, 'g');
-                fileContent = fileContent.replace(textRegex, `$1{{ '${key}' | translate }}`);
-            });
-
-            fs.writeFileSync(file, fileContent, 'utf8');
-            console.log(chalk.blue(`💾 Updated ${file}`));
+                fs.writeFileSync(file, fileContent, 'utf8');
+                console.log(chalk.blue(`💾 Updated ${file}`));
+            } else if (file.endsWith('.component.ts')) {
+                // Handle TypeScript replacements
+                replaceHardcodedTextInTS(file, replacements);
+            }
         });
 
         fs.writeFileSync(jsonPath, JSON.stringify(translationJson, null, 2), 'utf8');
