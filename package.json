@@ -6,7 +6,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pratiksonone/ngx-i18n-scan.git"
+    "url": "git+https://github.com/pratiksonone/ngx-i18n-scan.git"
   },
   "bugs": {
     "url": "https://github.com/pratiksonone/ngx-i18n-scan/issues"
