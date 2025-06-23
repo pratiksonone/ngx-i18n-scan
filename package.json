@@ -4,6 +4,14 @@
   "description": "A CLI tool to scan Angular projects for i18n keys, detect unused and duplicate keys, and auto-update translation files.",
   "main": "dist/bin/index.js",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pratiksonone/ngx-i18n-scan.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pratiksonone/ngx-i18n-scan/issues"
+  },
+  "homepage": "https://github.com/pratiksonone/ngx-i18n-scan#readme",
   "bin": {
     "ngx-i18n-scan": "dist/bin/index.js"
   },
